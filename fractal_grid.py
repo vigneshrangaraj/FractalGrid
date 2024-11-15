@@ -25,8 +25,8 @@ class FractalGrid(gym.Env):
 
         # Observation Space: SOC, Solar Generation, Load, Grid Power Exchange for each microgrid
         self.observation_space = spaces.Box(
-            low=np.array([0, 0, 0, -np.inf, -np.inf] * num_microgrids),  # Min values (SOC, Solar Gen, Load, Grid Power)
-            high=np.array([self.max_soc, self.max_power, self.max_load, self.max_power, self.max_power] * num_microgrids),
+            low=np.array([0, 0, 0, -np.inf, -np.inf, 0] * num_microgrids),  # Min values (SOC, Solar Gen, Load, Grid Power)
+            high=np.array([self.max_soc, self.max_power, self.max_load, self.max_power, self.max_power, 23] * num_microgrids),
             dtype=np.float32
         )
 
@@ -134,8 +134,11 @@ class FractalGrid(gym.Env):
             battery_power = 0
             if charge_discharge_action > 0:
                 # Charging the ESS (consumes power)
-                grid.ess.charge(charge_discharge_action * config.ESS_MAX_CHARGE_POWER, 1)
-                battery_power = -charge_discharge_action * config.ESS_MAX_CHARGE_POWER  # Negative for charging
+                grid.ess.charge(charge_discharge_action * config.ESS_MAX_CHARGE_POWER, 1, self.current_time_step)
+                if grid.ess.is_daytime(self.current_time_step):
+                    battery_power = -charge_discharge_action * config.ESS_MAX_CHARGE_POWER  # Positive for charging
+                else:
+                    battery_power = 0
             else:
                 # Discharging the ESS (supplies power)
                 grid.ess.discharge(abs(charge_discharge_action) * config.ESS_MAX_DISCHARGE_POWER, 1)
@@ -159,7 +162,6 @@ class FractalGrid(gym.Env):
         # Step 2: Process neighbor power exchanges based on switching actions
         # For each neighbor, adjust both microgrids' net power simultaneously if the switch is closed
         neighbor_transfers = [0] * self.num_microgrids  # Store power exchanged with neighbors for each microgrid
-        neighbot_power_available = [0] * self.num_microgrids  # Store power available from neighbors for each microgrid
 
         for i, microgrid in enumerate(self.microgrids):
             for neighbor in microgrid.neighbors:
@@ -199,7 +201,7 @@ class FractalGrid(gym.Env):
                         neighbor_transfers[i] += power_transferred  # Track transfer for microgrid i
                         neighbor_transfers[neighbor_index] -= power_transferred  # Track transfer for the neighbor
 
-                        info[f"power_transfer_{i}_{neighbor_index}"] = power_transferred
+                        info[f"power_transfer_{i}"] = power_transferred
 
                     # Mark this switch as processed
                     processed_switches.add(switch_name)

@@ -14,7 +14,7 @@ def load_model(agent, path):
     agent.load(path)
 
 
-def test_agent(env, agent, num_episodes=1):
+def test_agent(env, agent, num_episodes=7):
     """Test the trained agent without exploration (greedy policy)."""
     time_steps = np.arange(0, 23, 1)  # Assuming 24-hour period
     total_reward = 0
@@ -45,7 +45,7 @@ def test_agent(env, agent, num_episodes=1):
 
         while not done:
             # Act greedily (no exploration) using trained policy
-            action = agent.act(state, test_mode=True)
+            action = agent.select_action(state, add_noise=False)
             next_state, reward, done, _ = env.step(action)
             total_reward += reward
             processed_switches = set()
@@ -227,11 +227,16 @@ if __name__ == "__main__":
     env = FractalGrid(num_microgrids=7)  # Adjust initialization as needed
     
     # Initialize the DQN agent
-    agent = ActorCriticAgent(env.observation_space, env.action_space, gamma=0.99)
-    
+    agent = ActorCriticAgent(
+        state_size=env.observation_space.shape[0],
+        continuous_action_size=env.action_space[0].shape[0],
+        discrete_action_size=env.action_space[1].n  # For discrete actions
+    )
+
     # Load the trained model
-    model_path = 'save/dqn_fractal_grid.pth'
-    load_model(agent, model_path)
+    model_path_actor = 'save/dqn_fractal_grid_actor.pth'
+    model_path_critic = 'save/dqn_fractal_grid_critic.pth'
+    agent.load(model_path_actor, model_path_critic)
     
     # Run the testing and generate plots
     test_agent(env, agent, 1)

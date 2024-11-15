@@ -5,11 +5,12 @@ from fractal_grid import FractalGrid  # Import your FractalGrid environment
 import torch
 
 # Parameters
-EPISODES = 1000  # Number of training episodes
+EPISODES = 15000  # Number of training episodes
 MAX_STEPS = 100  # Max steps per episode
 TARGET_UPDATE = 10  # How often to update the target model
 SAVE_MODEL = True  # Save model after training
-MODEL_NAME = "dqn_fractal_grid.pth"  # Name of the model file
+MODEL_NAME_ACTOR = "dqn_fractal_grid_actor.pth"  # Name of the model file
+MODEL_NAME_CRITIC = "dqn_fractal_grid_critic.pth"
 SAVE_DIR = "save/"
 
 # Initialize the environment
@@ -18,7 +19,9 @@ env = FractalGrid(num_microgrids=7)
 # Initialize DQN agent
 observation_space = env.observation_space
 action_space = env.action_space
-agent = ActorCriticAgent(observation_space, action_space)
+agent = ActorCriticAgent(state_size=env.observation_space.shape[0],  # Assuming observation space is a flat vector
+    continuous_action_size=action_space[0].shape[0],  # Number of continuous actions
+    discrete_action_size=action_space[1].n)  # Number of discrete actions (e.g., binary switches))
 
 # Tracking metrics
 rewards_list = []
@@ -36,7 +39,7 @@ for episode in range(EPISODES):
     info = {}
     for step in range(MAX_STEPS):
         # Choose an action using the DQN agent
-        action = agent.act(state)
+        action = agent.select_action(state)
 
         # Take the action and get the result
         next_state, reward, done, _ = env.step(action)
@@ -68,15 +71,14 @@ for episode in range(EPISODES):
     # log and print the best model
     if episode_reward > best_reward:
         best_reward = episode_reward
-        agent.save(SAVE_DIR + MODEL_NAME)
+        agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC)
         print(f"Best model saved at episode {episode + 1} with total reward {episode_reward}")
         print(info)
 
 
-
-# Save the final model
+# Save the model
 if SAVE_MODEL:
-    agent.save(MODEL_NAME)
+    agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC)
 
 
 # Plotting metrics: reward vs. episode, epsilon vs. episode

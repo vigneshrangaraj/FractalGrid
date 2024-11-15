@@ -35,7 +35,8 @@ class MicroGrid:
                 self.ess.get_soc(),
                 self.load.get_demand(time_step, 23),
                 self.get_final_net_power(),
-                self.get_power_available_from_neighbors()
+                self.get_power_available_from_neighbors(),
+                time_step / 24.0
             ]
 
     def get_power_available_from_neighbors(self):

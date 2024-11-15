@@ -34,8 +34,14 @@ class EnergyStorageSystem:
 
         return available_charge_power, available_discharge_power
 
-    def charge(self, power, time_interval):
+    def is_daytime(self, time_step):
+        # Assuming a 24-hour cycle where time_step 0-11 is nighttime, 12-23 is daytime
+        return 6 <= time_step <= 18
+
+    def charge(self, power, time_interval, time_step):
         """Charge the battery with a given power over a specific time interval."""
+        if not self.is_daytime(time_step):
+            return
         # Ensure that power is within maximum charging limit
         power = min(power, self.charge_max)
         # Calculate the power on the DC side

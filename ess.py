@@ -42,24 +42,30 @@ class EnergyStorageSystem:
         """Charge the battery with a given power over a specific time interval."""
         if not self.is_daytime(time_step):
             return
-        # Ensure that power is within maximum charging limit
+        # Ensure power is within charging limit
         power = min(power, self.charge_max)
+        # Compute maximum allowable power based on remaining capacity
+        max_power_possible = (self.capacity * (self.soc_max - self.soc))
+        power = min(power, max_power_possible)
         # Calculate the power on the DC side
         power_dc = power * self.efficiency
-        # Update SOC based on the power input and time interval
-        self.soc += (power_dc * time_interval) / self.capacity
-        # Ensure SOC remains within the bounds
+        # Update SOC
+        self.soc += (power_dc) / self.capacity
+        # Ensure SOC remains within bounds
         self.soc = min(self.soc, self.soc_max)
 
     def discharge(self, power, time_interval):
         """Discharge the battery with a given power over a specific time interval."""
-        # Ensure that power is within maximum discharging limit
+        # Ensure power is within discharging limit
         power = min(power, self.discharge_max)
+        # Compute maximum allowable power based on remaining capacity
+        max_power_possible = (self.capacity * (self.soc - self.soc_min))
+        power = min(power, max_power_possible)
         # Calculate the power on the DC side
-        power_dc = power * self.efficiency
-        # Update SOC based on the power output and time interval
-        self.soc -= (power_dc * time_interval) / self.capacity
-        # Ensure SOC remains within the bounds
+        power_dc = power / self.efficiency
+        # Update SOC
+        self.soc -= power_dc / self.capacity
+        # Ensure SOC remains within bounds
         self.soc = max(self.soc, self.soc_min)
 
     def can_charge(self):

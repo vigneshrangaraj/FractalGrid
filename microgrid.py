@@ -28,6 +28,15 @@ class MicroGrid:
 
         self.index = 0
 
+    def reset_state(self):
+        return [
+            0,
+            0,
+            0,
+            0,
+            0
+        ]
+
 
     def get_state(self, time_step):
             return [
@@ -35,8 +44,7 @@ class MicroGrid:
                 self.ess.get_soc(),
                 self.load.get_demand(time_step, 23),
                 self.get_final_net_power(),
-                self.get_power_available_from_neighbors(),
-                time_step / 24.0
+                self.get_power_available_from_neighbors()
             ]
 
     def get_power_available_from_neighbors(self):
@@ -99,11 +107,10 @@ class MicroGrid:
     def dispatch_power(self, pv_dispatch_power):
         self.dispatch_pv_power = max(0, pv_dispatch_power)  # Ensure that dispatch_power is non-negativepv_dispatch_power
 
-    def calculate_local_net_power(self, pv_dispatch_power, load_demand, battery_power):
+    def calculate_local_net_power(self, pv_dispatch_power, load_demand):
         if pv_dispatch_power <= 0:
             pv_dispatch_power = 0
-        ess_power = battery_power
-        net_power = pv_dispatch_power + ess_power - load_demand
+        net_power = pv_dispatch_power - load_demand
         return net_power
 
     def get_power_to_grid(self, time_step):

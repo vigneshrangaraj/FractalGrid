@@ -3,7 +3,7 @@ import numpy as np
 
 
 class FractalGridOptimizer:
-    def __init__(self, num_microgrids=7, M=1000):
+    def __init__(self, num_microgrids=3, M=1000):
         self.num_microgrids = num_microgrids
         self.M = M  # Big-M constant to enforce logical constraints
 

@@ -15,8 +15,8 @@ ESS_CHARGE_EFFICIENCY = 0.9  # Charge efficiency (as a fraction)
 ESS_DISCHARGE_EFFICIENCY = 0.9  # Discharge efficiency (as a fraction)
 ESS_MAX_CHARGE_POWER = 50  # kW, maximum charging power
 ESS_MAX_DISCHARGE_POWER = 50  # kW, maximum discharging power
-ESS_MIN_SOC = 15  # Minimum SOC allowed to prevent over-discharging
-ESS_MAX_SOC = 100  # Maximum SOC allowed to prevent over-charging
+ESS_MIN_SOC = 0.15  # Minimum SOC allowed to prevent over-discharging
+ESS_MAX_SOC = 1  # Maximum SOC allowed to prevent over-charging
 
 # PV System Configuration
 PV_MAINTANENCE_COST = 0.05  # $/kWh, maintenance cost of PV system

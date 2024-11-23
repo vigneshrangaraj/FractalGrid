@@ -25,25 +25,27 @@ class FractalGrid(gym.Env):
 
         # Observation Space: SOC, Solar Generation, Load, Grid Power Exchange for each microgrid
         self.observation_space = spaces.Box(
-            low=np.array([0, 0, 0, -np.inf, -np.inf, 0] * num_microgrids),  # Min values (SOC, Solar Gen, Load, Grid Power)
-            high=np.array([self.max_soc, self.max_power, self.max_load, self.max_power, self.max_power, 23] * num_microgrids),
+            low=np.concatenate([
+                np.array([0, 0, 0, -np.inf, -np.inf] * num_microgrids),  # Min values for microgrid features
+                np.array([0])  # Min value for timestep
+            ]),
+            high=np.concatenate([
+                np.array(
+                    [self.max_soc, self.max_power, self.max_load, self.max_power, self.max_power] * num_microgrids),
+                np.array([23])  # Max value for timestep
+            ]),
             dtype=np.float32
         )
 
         # Action Space: Charge/Discharge ESS, Buy/Sell Power to/from Grid, Dispatch PV Power, Switching Action
         # Continuous actions: -1 to 1 for charge/discharge, buy/sell, and 0 to 1 for PV dispatch
-        # Discrete actions: 0 for open switch, 1 for closed switch
         action_space_continuous = spaces.Box(
             low=np.array([-1] * num_microgrids * 3),  # Discharge/sell, PV dispatch
-            high=np.array([1] * num_microgrids * 3),  # Charge/buy, PV dispatch
-            dtype=np.float32
+            high=np.array([1] * num_microgrids * 3)  # Charge/buy, PV dispatch
         )
 
-        # Adding a discrete action for switching (0 = open, 1 = closed)
-        action_space_switching = spaces.MultiBinary(self.total_switches)  # 0 or 1 for each switch
-
         # Combining the continuous action space with the discrete switching space
-        self.action_space = spaces.Tuple((action_space_continuous, action_space_switching))
+        self.action_space = action_space_continuous
 
         # Initialize logs for metrics
         self.soc_log = [[] for _ in range(self.num_microgrids)]  # Log SOC for each microgrid
@@ -56,6 +58,9 @@ class FractalGrid(gym.Env):
         state = []
         for grid in self.microgrids:
             state.extend(grid.get_state(0))
+
+        # Include the current time step in the state
+        state.append(self.current_time_step / self.max_time_steps)  # Normalized time
         return np.array(state)
 
 
@@ -104,7 +109,7 @@ class FractalGrid(gym.Env):
     def step(self, action):
         info = {}
         # Separate continuous and discrete actions
-        continuous_actions, switching_actions = action
+        continuous_actions = action
 
         total_power_bought = 0
         total_power_sold = 0
@@ -132,22 +137,9 @@ class FractalGrid(gym.Env):
 
             # Handle the charge or discharge action on the Battery class
             battery_power = 0
-            if charge_discharge_action > 0:
-                # Charging the ESS (consumes power)
-                grid.ess.charge(charge_discharge_action * config.ESS_MAX_CHARGE_POWER, 1, self.current_time_step)
-                if grid.ess.is_daytime(self.current_time_step):
-                    battery_power = -charge_discharge_action * config.ESS_MAX_CHARGE_POWER  # Positive for charging
-                else:
-                    battery_power = 0
-            else:
-                # Discharging the ESS (supplies power)
-                grid.ess.discharge(abs(charge_discharge_action) * config.ESS_MAX_DISCHARGE_POWER, 1)
-                battery_power = abs(charge_discharge_action) * config.ESS_MAX_DISCHARGE_POWER # Positive for discharging
-
-            info[f"charge_discharge_{i}"] = battery_power
 
             # Dispatch PV power for the current microgrid
-            pv_dispatch_power = min(self.max_power, pv_dispatch_action * solar_generation)  # pv_dispatch_action * solar_generation
+            pv_dispatch_power = min(self.max_power, abs(pv_dispatch_action) * solar_generation)  # pv_dispatch_action * solar_generation
             grid.dispatch_power(pv_dispatch_power)
 
             # Calculate the load demand for the microgrid from the Load class
@@ -156,8 +148,39 @@ class FractalGrid(gym.Env):
             grid.load.set_current_load(load_demand)
 
             # Step 1a: Calculate local net power for the current microgrid (before neighbor interactions)
-            local_net_power = grid.calculate_local_net_power(pv_dispatch_power, load_demand, battery_power)
+            local_net_power = grid.calculate_local_net_power(pv_dispatch_power, load_demand)
+
+            if local_net_power > 0:
+                # Check if SOC is below max limit before charging
+                if grid.ess.soc < grid.ess.soc_max:
+                    available_capacity = (grid.ess.soc_max - grid.ess.soc) * grid.ess.capacity  # Max energy that can be added
+                    max_charging_power = min(available_capacity,
+                                             config.ESS_MAX_CHARGE_POWER)  # Ensure we don't exceed SOC limit
+                    actual_charging_power = min(abs(charge_discharge_action) * config.ESS_MAX_DISCHARGE_POWER, local_net_power, max_charging_power)
+                    # Perform the charging
+                    grid.ess.charge(abs(actual_charging_power), 1, self.current_time_step)
+                    battery_power = -actual_charging_power  # Positive for charging
+                    local_net_power -= actual_charging_power
+                else:
+                    battery_power = 0  # No charging if SOC is at max
+            else:
+                if grid.ess.soc > grid.ess.soc_min:
+                    available_energy = (grid.ess.soc - grid.ess.soc_min) * grid.ess.capacity  # Max energy that can be discharged
+                    max_discharging_power = min(available_energy,
+                                                config.ESS_MAX_DISCHARGE_POWER)  # Ensure we don't exceed SOC limit
+                    actual_discharging_power = min(abs(charge_discharge_action) * config.ESS_MAX_DISCHARGE_POWER, max_discharging_power)
+
+                    # Perform the discharging
+                    grid.ess.discharge(actual_discharging_power, 1)
+                    battery_power = actual_discharging_power  # Positive for discharging
+                    local_net_power += actual_discharging_power
+                else:
+                    battery_power = 0  # No discharging if SOC is at min
+
             local_net_powers.append(local_net_power)  # Store the local net power for this microgrid
+
+            info[f"charge_discharge_{i}"] = battery_power
+            info[f"soc_{i}"] = grid.ess.get_soc()
 
         # Step 2: Process neighbor power exchanges based on switching actions
         # For each neighbor, adjust both microgrids' net power simultaneously if the switch is closed
@@ -173,35 +196,55 @@ class FractalGrid(gym.Env):
                 # Only process this switch if it hasn't been processed before
                 if switch_name not in processed_switches:
                     # Get switch state using the global switch index
-                    switch_state = switching_actions[switch_index]
                     switch_index += 1  # Increment global switch index for next neighbor
-                    info[switch_name] = switch_state
 
                     # Update neighbor power availability and dont double count
                     neighbor_transfers[i] += local_net_powers[neighbor_index]
 
-                    if switch_state == 1:  # Switch is closed, power transfer is allowed
-                        # Get net power of the current microgrid and its neighbor
-                        net_power_i = local_net_powers[i]  # Current microgrid's local net power
-                        net_power_neighbor = local_net_powers[neighbor_index]  # Neighbor's local net power
+                    # Get net power of the current microgrid and its neighbor
+                    net_power_i = local_net_powers[i]  # Current microgrid's local net power
+                    net_power_neighbor = local_net_powers[neighbor_index]  # Neighbor's local net power
 
-                        # Transfer power if necessary based on local power status
-                        power_transferred = 0
-                        if net_power_i < 0 and net_power_neighbor > 0:
-                            # Microgrid i needs power, neighbor has excess
-                            power_transferred = min(abs(net_power_i), net_power_neighbor)
-                            local_net_powers[i] += power_transferred  # Microgrid i receives power
-                            local_net_powers[neighbor_index] -= power_transferred  # Neighbor gives power
-                        elif net_power_i > 0 and net_power_neighbor < 0:
-                            # Microgrid i has excess power, neighbor needs power
-                            power_transferred = min(net_power_i, abs(net_power_neighbor))
-                            local_net_powers[i] -= power_transferred  # Microgrid i gives power
-                            local_net_powers[neighbor_index] += power_transferred  # Neighbor receives power
+                    # Transfer power if necessary based on local power status
+                    power_transferred = 0
+                    if net_power_i < 0 and net_power_neighbor > 0:
+                        # Microgrid i needs power, neighbor has excess
+                        power_transferred = min(abs(net_power_i), net_power_neighbor)
+                        local_net_powers[i] += power_transferred  # Microgrid i receives power
+                        net_power_i += power_transferred
+                        local_net_powers[neighbor_index] -= power_transferred  # Neighbor gives power
+                        net_power_neighbor -= power_transferred
+                        if f"power_transfer_{i}" in info:
+                            info[f"power_transfer_{i}"] += power_transferred
+                        else:
+                            info[f"power_transfer_{i}"] = power_transferred
+                        if f"power_transfer_{neighbor_index}" in info:
+                            info[f"power_transfer_{neighbor_index}"] -= power_transferred
+                        else:
+                            info[f"power_transfer_{neighbor_index}"] = -power_transferred
+                    elif net_power_i > 0 and net_power_neighbor < 0:
+                        # Microgrid i has excess power, neighbor needs power
+                        power_transferred = min(net_power_i, abs(net_power_neighbor))
+                        local_net_powers[i] -= power_transferred  # Microgrid i gives power
+                        net_power_i -= power_transferred
+                        local_net_powers[neighbor_index] += power_transferred  # Neighbor receives power
+                        net_power_neighbor += power_transferred
+                        if f"power_transfer_{i}" in info:
+                            info[f"power_transfer_{i}"] -= power_transferred
+                        else:
+                            info[f"power_transfer_{i}"] = -power_transferred
+                        if f"power_transfer_{neighbor_index}" in info:
+                            info[f"power_transfer_{neighbor_index}"] += power_transferred
+                        else:
+                            info[f"power_transfer_{neighbor_index}"] = power_transferred
 
-                        neighbor_transfers[i] += power_transferred  # Track transfer for microgrid i
-                        neighbor_transfers[neighbor_index] -= power_transferred  # Track transfer for the neighbor
+                    if power_transferred != 0:
+                        info[switch_name] = 1
+                    else:
+                        info[switch_name] = 0
 
-                        info[f"power_transfer_{i}"] = power_transferred
+                    neighbor_transfers[i] += power_transferred  # Track transfer for microgrid i
+                    neighbor_transfers[neighbor_index] -= power_transferred  # Track transfer for the neighbor
 
                     # Mark this switch as processed
                     processed_switches.add(switch_name)
@@ -223,9 +266,10 @@ class FractalGrid(gym.Env):
             # Adjust grid power exchange based on the action and the net power
             grid_exchange_action = continuous_actions[i * 3 + 1]  # Buy/Sell power from/to the grid
             if grid_exchange_action > 0:
-                # Buy power from the grid based on the action and the net power shortfall
-                P_buy = min(grid_exchange_action * self.max_power, abs(net_power), self.max_power)
-                P_sell = 0  # No selling to the grid
+                if net_power < 0:
+                    # Buy power from the grid based on the action and the net power shortfall
+                    P_buy = min(grid_exchange_action * self.max_power, abs(net_power), self.max_power)
+                    P_sell = 0  # No selling to the grid
             elif grid_exchange_action < 0:
                 if net_power > 0:
                     # Sell power to the grid based on the action and the available surplus power
@@ -248,17 +292,16 @@ class FractalGrid(gym.Env):
 
             # penalize by fining if the net power is negative
             if net_power < 0:
-                total_operational_cost += abs(net_power) * 300
-
-            # incentivize if the power transfer was utilized
-            if neighbor_transfers[i] != 0:
-                total_operational_cost -= abs(neighbor_transfers[i]) * 5
+                total_operational_cost += abs(net_power) * 10
+            #
+            # # incentivize if the power transfer was utilized
+            # if neighbor_transfers[i] != 0:
+            #     total_operational_cost -= abs(neighbor_transfers[i]) * 5
 
             total_operational_cost += operational_cost
 
             # Store net power information for each microgrid
             info[f"net_load_{i}"] = grid.current_demand
-            info[f"soc_{i}"] = grid.ess.get_soc()
             info[f"grid_{i}"] = local_net_powers[i]
             info[f"pv_dispatch_{i}"] = max(0, grid.dispatch_pv_power)
             info[f"neighbor_available_power_{i}"] = sum(neighbor.final_net_power for neighbor in grid.neighbors)
@@ -278,7 +321,7 @@ class FractalGrid(gym.Env):
         self.state = next_state  # Update the current state
 
         info["total_grid_exchange_power"] = total_power_bought - total_power_sold
-        info["total_pv_dispatch_power"] = sum(grid.dispatch_pv_power for grid in self.microgrids)
+        info["total_net_load"] = sum(grid.final_net_power for grid in self.microgrids)
 
         # Return the new state, reward, done status, and any additional info
         return next_state, reward, done, info
@@ -291,6 +334,9 @@ class FractalGrid(gym.Env):
         observations = []
         for microgrid in self.microgrids:
             observations.extend(microgrid.get_state(time_step))
+
+        # Include the current time step in the state
+        observations.append(time_step / self.max_time_steps)
 
         return np.array(observations)
 

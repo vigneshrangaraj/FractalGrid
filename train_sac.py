@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from dqn_agent import ActorCriticAgent
+from sympy.benchmarks.bench_meijerint import alpha
+
+from sac_dqn_agent import SoftActorCriticAgent
 from fractal_grid import FractalGrid  # Import your FractalGrid environment
 import torch
 import json
@@ -10,12 +12,19 @@ EPISODES = 15000  # Number of training episodes
 MAX_STEPS = 100  # Max steps per episode
 TARGET_UPDATE = 10  # How often to update the target model
 SAVE_MODEL = True  # Save model after training
-MODEL_NAME_ACTOR = "dqn_fractal_grid_actor.pth"  # Name of the model file
-MODEL_NAME_CRITIC = "dqn_fractal_grid_critic.pth"
+MODEL_NAME_ACTOR = "sac_fractal_grid_actor.pth"  # Name of the model file
+MODEL_NAME_CRITIC1 = "sac_fractal_grid_critic1.pth"
+MODEL_NAME_CRITIC2 = "sac_fractal_grid_critic2.pth"
+
 SMOOTHING_WINDOW = 100  # Size of the moving average window for smoothing rewards
 SAVE_DIR = "save/"
 
-METRICS_FILE = SAVE_DIR + "metrics.json"  # File to save metrics
+METRICS_FILE = SAVE_DIR + "metrics_sac.json"  # File to save metrics
+
+# Detect if MPS is available
+device = torch.device("cpu")
+
+print(f"Using device: {device}")
 
 # Initialize the environment
 env = FractalGrid(num_microgrids=1)
@@ -23,8 +32,9 @@ env = FractalGrid(num_microgrids=1)
 # Initialize DQN agent
 observation_space = env.observation_space
 action_space = env.action_space
-agent = ActorCriticAgent(state_size=env.observation_space.shape[0],  # Assuming observation space is a flat vector
-    continuous_action_size=action_space.shape[0])  # Number of continuous actions
+agent = SoftActorCriticAgent(state_size=env.observation_space.shape[0],  # Assuming observation space is a flat vector
+    action_size=action_space.shape[0])  # Number of continuous actions
+
 
 # Analyze action exploration
 def analyze_action_exploration(action_logs, num_bins=20):
@@ -115,24 +125,34 @@ def plot_metrics():
     plt.title('Rewards vs. Episodes')
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"{SAVE_DIR}/rewards_vs_episodes.png")
+    plt.savefig(f"{SAVE_DIR}/sac_rewards_vs_episodes.png")
     plt.close()
 
-    # Plot epsilon decay
     plt.figure(figsize=(10, 5))
-    plt.plot(epsilon_list, episodes_list, label='Epsilon Decay', color='orange')
-    plt.xlabel('Episodes')
-    plt.ylabel('Epsilon')
-    plt.title('Epsilon Decay vs. Episodes')
+    plt.plot(entropies, label="Policy Entropy", color="blue")
+    plt.xlabel("Episodes")
+    plt.ylabel("Entropy")
+    plt.title("Policy Entropy vs. Episodes")
     plt.legend()
     plt.grid(True)
-    plt.savefig(f"{SAVE_DIR}/epsilon_decay_vs_episodes.png")
+    plt.savefig(f"{SAVE_DIR}/entropy_vs_episodes.png")
+    plt.close()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(alpha_values, label="Alpha (Entropy Coefficient)", color="orange")
+    plt.xlabel("Episodes")
+    plt.ylabel("Alpha")
+    plt.title("Entropy Coefficient vs. Episodes")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f"{SAVE_DIR}/alpha_vs_episodes.png")
     plt.close()
 
 # Tracking metrics
 rewards_list = []
-epsilon_list = []
+entropies = []  # To track entropy over episodes
 episodes_list = []
+alpha_values = []
 
 # Initialize action_logs as a list
 action_logs = []
@@ -157,10 +177,9 @@ for episode in range(EPISODES):
         next_state, reward, done, _ = env.step(action)
 
         # Store the transition in memory
-        agent.remember(state, action, reward, next_state, done)
+        agent.store_transition(state, action, reward, next_state, done)
 
-        if episode % update_frequency == 0:
-            agent.replay()
+        agent.update()
 
         # Accumulate rewards
         episode_reward += reward
@@ -172,11 +191,22 @@ for episode in range(EPISODES):
 
         if done:
             break
+
+    # Compute entropy for the current policy
+    with torch.no_grad():
+        _, log_std = agent.actor(torch.FloatTensor(state).unsqueeze(0).to(device))
+        entropy = (0.5 * (1.0 + np.log(2 * np.pi)) + log_std).sum().item()
+        entropies.append(entropy)
+
+    alpha_values.append(agent.log_alpha.exp().item())
+
     if (episode + 1) % log_frequency == 0:
         print(
-            f"Episode {episode + 1}/{EPISODES}, Total Reward: {episode_reward}, Epsilon: {agent.epsilon:.2f} best reward: {best_reward}")
-    # Decay epsilon after each episode
-    epsilon_list.append(agent.epsilon)
+            f"Episode {episode + 1}/{EPISODES}, Total Reward: {episode_reward}, entropy: {entropy:.2f}"
+             ", alpha: {agent.log_alpha.exp().item():.2f" + f", best reward: {best_reward}")
+
+
+
     rewards_list.append(episode_reward)
     episodes_list.append(episode)
 
@@ -193,7 +223,8 @@ for episode in range(EPISODES):
     metrics = {
         "episodes": episodes_list,
         "rewards": rewards_list,
-        "epsilon": epsilon_list,
+        "entropies": entropies,
+        "alpha": alpha_values
     }
 
     with open(METRICS_FILE, "w") as f:
@@ -205,15 +236,15 @@ for episode in range(EPISODES):
     # log and print the best model
     if episode_reward > best_reward:
         best_reward = episode_reward
-        agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC)
+        agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC1, SAVE_DIR + MODEL_NAME_CRITIC2)
         print(f"Best model saved at episode {episode + 1} with total reward {episode_reward}")
         print(info)
 
     # Save every 100 episodes
     if (episode + 1) % 100 == 0:
-        agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC)
+        agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC1, SAVE_DIR + MODEL_NAME_CRITIC2)
 
 
 # Save the model
 if SAVE_MODEL:
-    agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC)
+    agent.save(SAVE_DIR + MODEL_NAME_ACTOR, SAVE_DIR + MODEL_NAME_CRITIC1, SAVE_DIR + MODEL_NAME_CRITIC2)

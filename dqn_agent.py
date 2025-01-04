@@ -10,12 +10,6 @@ device = torch.device("cpu")
 
 print(f"Using device: {device}")
 
-
-import torch.nn as nn
-
-import torch
-import torch.nn as nn
-
 class Actor(nn.Module):
     def __init__(self, state_size, continuous_action_size, hidden_size=256, action_low=-1.0, action_high=1.0):
         super(Actor, self).__init__()

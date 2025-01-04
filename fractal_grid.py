@@ -74,6 +74,7 @@ class FractalGrid(gym.Env):
 
         # Connect microgrids using a Fractal Tree structure
         if num_microgrids == 1:
+            microgrids.append(MicroGrid(1, max_power))
             return microgrids, 0  # Only one microgrid, no switches needed
 
         for i in range(num_microgrids):
@@ -127,7 +128,6 @@ class FractalGrid(gym.Env):
         for i in range(self.num_microgrids):
             # Extract the continuous actions for this microgrid
             charge_discharge_action = continuous_actions[i * 3]  # Charging/Discharging ESS
-            grid_exchange_action = continuous_actions[i * 3 + 1]  # Buy/Sell power from/to the grid
             pv_dispatch_action = continuous_actions[i * 3 + 2]  # Dispatch PV power (0 to 1)
 
             grid = self.microgrids[i]
@@ -268,7 +268,7 @@ class FractalGrid(gym.Env):
             if grid_exchange_action > 0:
                 if net_power < 0:
                     # Buy power from the grid based on the action and the net power shortfall
-                    P_buy = min(grid_exchange_action * self.max_power, abs(net_power), self.max_power)
+                    P_buy = min(abs(grid_exchange_action) * self.max_power, abs(net_power), self.max_power)
                     P_sell = 0  # No selling to the grid
             elif grid_exchange_action < 0:
                 if net_power > 0:

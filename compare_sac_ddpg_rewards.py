@@ -1,6 +1,7 @@
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+from itertools import cycle
 
 SAVE_DIR = "save/"
 
@@ -17,6 +18,18 @@ plt.rcParams.update({
     'lines.linewidth': 3,  # Default line thickness
     'axes.grid': False  # Disable grid lines
 })
+
+# line styles for black-and-white compatibility
+line_styles = cycle([
+    '-',
+    '--',
+    '-.',
+    ':',
+    (0, (3, 5, 1, 5)),  # Dash-dot-dash
+    (0, (5, 10)),       # Long dashes
+    (0, (1, 1)),        # Dense dots
+    (0, (5, 2, 1, 2))   # Long dash followed by short dash
+])
 
 # Load the DDPG metrics
 with open("save/metrics.json", "r") as file:
@@ -59,8 +72,8 @@ sac_episodes_smoothed = sac_episodes[:len(sac_rewards_smoothed)]
 
 # Plot the smoothed rewards for DDPG and SAC
 plt.figure(figsize=(15, 8))
-plt.plot(ddpg_episodes_smoothed, ddpg_rewards_smoothed, label="DDPG", alpha=0.8)
-plt.plot(sac_episodes_smoothed, sac_rewards_smoothed, label="SAC", alpha=0.8)
+plt.plot(ddpg_episodes_smoothed, ddpg_rewards_smoothed, label="DDPG", alpha=0.8, linestyle=next(line_styles))
+plt.plot(sac_episodes_smoothed, sac_rewards_smoothed, label="SAC", alpha=0.8, linestyle=next(line_styles))
 plt.title("Rewards vs Episodes: DDPG vs SAC")
 plt.xlabel("Episodes")
 plt.ylabel("Rewards")

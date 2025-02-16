@@ -81,7 +81,7 @@ class Critic(nn.Module):
 
 
 class SoftActorCriticAgent:
-    def __init__(self, state_size, action_size, hidden_size=256, gamma=0.99, tau=0.005, alpha=0.2, lr=3e-4):
+    def __init__(self, state_size, action_size, hidden_size=512, gamma=0.99, tau=0.005, alpha=0.1, lr=3e-4):
         self.state_size = state_size
         self.action_size = action_size
         self.hidden_size = hidden_size
@@ -91,7 +91,7 @@ class SoftActorCriticAgent:
 
         # Replay memory
         self.memory = deque(maxlen=100000)
-        self.batch_size = 64
+        self.batch_size = 256
 
         # Actor network
         self.actor = Actor(state_size, action_size).to(device)

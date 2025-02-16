@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from fractal_grid import FractalGrid
 from sac_dqn_agent import SoftActorCriticAgent
+from itertools import cycle
 import networkx as nx
+import json
 
 SAVE_DIR = "save/"
 NUM_EPISODES = 1000
@@ -57,7 +59,6 @@ def test_agent(env, agent, num_episodes=100):
         episode_reward = 0
         state = env.reset()
         done = False
-
         while not done:
             processed_switches = set()
             # Deterministic policy for testing
@@ -92,14 +93,14 @@ def test_agent(env, agent, num_episodes=100):
     switching_data = [list(value) for value in switch_dict.values() if value is not None]
 
     # Convert data to arrays for visualization
-    plot_net_load(time_steps, net_load_data)
-    visualize_tree(env.microgrids)
-    plot_battery_soc(time_steps, charge_discharge_data, soc_data)
-    plot_grid_pv(time_steps, grid_data, pv_dispatch_data)
-    plot_switching_schedule(time_steps, switching_data)
-    plot_power_transfer(time_steps, power_transfer_data)
+    # plot_net_load(time_steps, net_load_data)
+    # visualize_tree(env.microgrids)
+    # plot_battery_soc(time_steps, charge_discharge_data, soc_data)
+    # plot_grid_pv(time_steps, grid_data, pv_dispatch_data)
+    # plot_switching_schedule(time_steps, switching_data)
+    # plot_power_transfer(time_steps, power_transfer_data)
     plot_total_grid_power_and_pv_dispatch(
-        time_steps, total_grid_power_data[-161:], total_pv_dispatch_data[-161:]
+       time_steps, total_grid_power_data[-161:], total_pv_dispatch_data[-161:]
     )
 
 # --- Plotting Functions ---
@@ -108,9 +109,21 @@ def test_agent(env, agent, num_episodes=100):
 def plot_total_grid_power_and_pv_dispatch(time_steps, total_grid_power_data, total_pv_dispatch_data):
     plt.figure(figsize=(30, 8))
 
+    # line styles for black-and-white compatibility
+    line_styles = cycle([
+        '-',
+        '--',
+        '-.',
+        ':',
+        (0, (3, 5, 1, 5)),  # Dash-dot-dash
+        (0, (5, 10)),  # Long dashes
+        (0, (1, 1)),  # Dense dots
+        (0, (5, 2, 1, 2))  # Long dash followed by short dash
+    ])
+
     # Plot the data
-    plt.plot(time_steps, total_grid_power_data, label='Total power exchanged with Main Grid')
-    plt.plot(time_steps, total_pv_dispatch_data, label='Total Net MicroGrid power')
+    plt.plot(time_steps, total_grid_power_data, label='Total power exchanged with Main Grid' , linestyle=next(line_styles))
+    plt.plot(time_steps, total_pv_dispatch_data, label='Total Net MicroGrid power' , linestyle=next(line_styles))
 
     # Set x-axis ticks and labels to represent days
     xticks = time_steps[::24]  # Use every 24th hour for tick marks
@@ -187,6 +200,18 @@ def plot_battery_soc(time_steps, charge_discharge_data, soc_data):
 
 
 def plot_grid_pv(time_steps, grid_data, pv_dispatch_data):
+    # Define line styles for black-and-white compatibility
+    line_styles = cycle([
+        '-',
+        '--',
+        '-.',
+        ':',
+        (0, (3, 5, 1, 5)),  # Dash-dot-dash
+        (0, (5, 10)),  # Long dashes
+        (0, (1, 1)),  # Dense dots
+        (0, (5, 2, 1, 2))  # Long dash followed by short dash
+    ])
+
     n = len(pv_dispatch_data)  # Number of microgrids
     cols = 2  # Number of columns
     rows = (n + 1) // cols  # Calculate the number of rows needed
@@ -202,7 +227,7 @@ def plot_grid_pv(time_steps, grid_data, pv_dispatch_data):
 
         # Line plot for grid power bought/sold
         ax2 = ax1.twinx()
-        ax2.plot(time_steps, grid_power[-161:], label=f'Grid Power {i + 1}', marker='x', color='green')
+        ax2.plot(time_steps, grid_power[-161:], label=f'Grid Power {i + 1}', marker='x', color='green', linestyle=next(line_styles))
 
         # Convert x-axis to represent days
         ax1.set_xticks(time_steps[::24])  # Set ticks every 24 hours

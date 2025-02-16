@@ -8,18 +8,18 @@ import torch
 import json
 
 # Parameters
-EPISODES = 15000  # Number of training episodes
+EPISODES = 5000  # Number of training episodes
 MAX_STEPS = 100  # Max steps per episode
 TARGET_UPDATE = 10  # How often to update the target model
 SAVE_MODEL = True  # Save model after training
-MODEL_NAME_ACTOR = "sac_fractal_grid_actor.pth"  # Name of the model file
-MODEL_NAME_CRITIC1 = "sac_fractal_grid_critic1.pth"
-MODEL_NAME_CRITIC2 = "sac_fractal_grid_critic2.pth"
+MODEL_NAME_ACTOR = "sac_fractal_grid_actor_sac_256_p99_p1_512.pth"  # Name of the model file
+MODEL_NAME_CRITIC1 = "sac_fractal_grid_critic1_sac_256_p99_p1_512.pth"
+MODEL_NAME_CRITIC2 = "sac_fractal_grid_critic2_sac_256_p99_p1_512.pth"
 
 SMOOTHING_WINDOW = 100  # Size of the moving average window for smoothing rewards
 SAVE_DIR = "save/"
 
-METRICS_FILE = SAVE_DIR + "metrics_sac.json"  # File to save metrics
+METRICS_FILE = SAVE_DIR + "metrics_sac_256_p99_p1_512.json"  # File to save metrics
 
 # Detect if MPS is available
 device = torch.device("cpu")
@@ -27,7 +27,7 @@ device = torch.device("cpu")
 print(f"Using device: {device}")
 
 # Initialize the environment
-env = FractalGrid(num_microgrids=1)
+env = FractalGrid(num_microgrids=3)
 
 # Initialize DQN agent
 observation_space = env.observation_space

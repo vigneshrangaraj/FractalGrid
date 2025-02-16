@@ -78,7 +78,7 @@ class FractalGrid(gym.Env):
             return microgrids, 0  # Only one microgrid, no switches needed
 
         for i in range(num_microgrids):
-            microgrid = MicroGrid(1, max_power)
+            microgrid = MicroGrid(1, max_power, i)
             microgrids.append(microgrid)
         for i in range(num_microgrids):
             left_child = 2 * i + 1  # Calculate index of left child

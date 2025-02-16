@@ -6,10 +6,10 @@ from utils import config
 
 
 class MicroGrid:
-    def __init__(self, delta_t=1, max_grid_power=25):
+    def __init__(self, delta_t=1, max_grid_power=25, seed=0):
         self.solar_panel = SolarPanel(max_grid_power)
         self.ess = EnergyStorageSystem(config.ESS_MAX_CAPACITY, config.ESS_MIN_SOC, config.ESS_MAX_SOC, config.ESS_MAX_CHARGE_POWER, config.ESS_MAX_DISCHARGE_POWER)
-        self.load = HomeAreaNetwork()
+        self.load = HomeAreaNetwork(seed=seed, use_seed=False)
         self.switch = 0  # Assume switch is open initially
         self.delta_t = delta_t
         self.degradation_factor = 1

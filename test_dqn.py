@@ -6,6 +6,8 @@ from fractal_grid import FractalGrid
 from dqn_agent import ActorCriticAgent
 import networkx as nx
 
+plt.rcParams['figure.dpi'] = 300
+
 SAVE_DIR = "save/"
 NUM_EPISODES = 1000
 
@@ -72,7 +74,7 @@ def test_agent(env, agent, num_episodes=100):
                         switch_dict[switch_name].append(_[f"S_{min(grid.index, neighbor.index)}_to_{max(grid.index, neighbor.index)}"])
                         processed_switches.add(switch_name)
 
-                power_transfer_data[i].append(_[f"power_transfer_{i}"] if f"power_transfer_{i}" in _ else 0)
+                power_transfer_data[i].append(_[f"power_transfer"] if f"power_transfer" in _ else [])
 
             state = next_state
 

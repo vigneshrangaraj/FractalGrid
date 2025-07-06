@@ -1,3 +1,6 @@
+import csv
+
+import pandas as pd
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,6 +28,9 @@ plt.rcParams.update({
     'axes.grid': False  # Disable grid lines
 })
 
+
+plt.rcParams['figure.dpi'] = 100
+
 # Load Trained Model
 def load_model(agent, actor_path, critic1_path, critic2_path):
     """Load the saved SAC model from the specified paths."""
@@ -44,7 +50,9 @@ def test_agent(env, agent, num_episodes=100):
     pv_dispatch_data = [[] for _ in range(num_microgrids)]
     switching_data = [[] for _ in range(num_microgrids)]
     power_transfer_data = [[] for _ in range(num_microgrids)]
+    power_transfer_agg_data = [[] for _ in range(num_microgrids)]
     total_grid_power_data = []
+    power_transfer_hourly = []
     total_pv_dispatch_data = []
 
     # Initialize switch dictionary
@@ -59,13 +67,33 @@ def test_agent(env, agent, num_episodes=100):
         episode_reward = 0
         state = env.reset()
         done = False
+        power_transfer_daily = []
+        hour = 0
+
         while not done:
+
             processed_switches = set()
             # Deterministic policy for testing
             action = agent.select_action(state, test_mode=True)
             next_state, reward, done, _ = env.step(action)
             total_reward += reward
             episode_reward += reward
+
+            # Collect power transfer data
+            # each power transfer is (src, dst, power)
+            # so for every hour, look for src and dst combo and sum power
+            for power_transfer in _["power_transfers"]:
+                src = power_transfer[0]
+                dst = power_transfer[1]
+                power = power_transfer[2]
+                power_transfer_hourly.append([episode, hour, src, dst, power])
+                # loop through power_transfer_daily and find src and dst combo and sum power
+                for i in range(len(power_transfer_daily)):
+                    if power_transfer_daily[i][0] == src and power_transfer_daily[i][1] == dst:
+                        power_transfer_daily[i][2] += power
+                        break
+                else:
+                    power_transfer_daily.append([src, dst, power])
 
             # Collect data for visualization
             total_grid_power_data.append(_["total_grid_exchange_power"])
@@ -84,13 +112,22 @@ def test_agent(env, agent, num_episodes=100):
                         switch_dict[switch_name].append(_[switch_name])
                         processed_switches.add(switch_name)
 
-                power_transfer_data[i].append(_[f"power_transfer_{i}"] if f"power_transfer_{i}" in _ else 0)
+                power_transfer_agg_data[i].append(_[f"power_transfer_agg_{i}"] if f"power_transfer_agg_{i}" in _ else 0)
+
+            hour += 1
 
             state = next_state
+
+        power_transfer_data.append(power_transfer_daily)
 
         print(f"Episode {episode + 1}/{num_episodes}: Total Reward: {episode_reward:.2f}")
 
     switching_data = [list(value) for value in switch_dict.values() if value is not None]
+    # power transfers data is array of array with for each microgrid.
+    # Within each microgrid, we have hourly data of power transfer to other microgrids that has day, hour, src, dst, power
+    # save this to a CSV file with column names
+    power_transfer_hourly_df = pd.DataFrame(power_transfer_hourly, columns=["episode", "hour", "src", "dst", "power"])
+    power_transfer_hourly_df.to_csv("power_transfer_hourly.csv", index=False)
 
     # Convert data to arrays for visualization
     # plot_net_load(time_steps, net_load_data)
@@ -98,10 +135,12 @@ def test_agent(env, agent, num_episodes=100):
     # plot_battery_soc(time_steps, charge_discharge_data, soc_data)
     # plot_grid_pv(time_steps, grid_data, pv_dispatch_data)
     # plot_switching_schedule(time_steps, switching_data)
-    # plot_power_transfer(time_steps, power_transfer_data)
-    plot_total_grid_power_and_pv_dispatch(
-       time_steps, total_grid_power_data[-161:], total_pv_dispatch_data[-161:]
-    )
+    plot_power_transfer(time_steps, power_transfer_data)
+    plot_power_transfer_agg(time_steps, power_transfer_agg_data)
+    plot_power_transfer_together(time_steps, power_transfer_agg_data)
+    # plot_total_grid_power_and_pv_dispatch(
+    #    time_steps, total_grid_power_data[-161:], total_pv_dispatch_data[-161:]
+    # )
 
 # --- Plotting Functions ---
 
@@ -335,6 +374,129 @@ def visualize_tree(nodes):
     plt.savefig(SAVE_DIR + "fractalgrid.png")
 
 def plot_power_transfer(time_steps, power_transfer_data):
+
+    # Define font and style settings
+    plt.rcParams.update({
+        'font.size': 20,  # Set font size for labels and titles
+        'font.weight': 'bold',  # Use bold font for emphasis
+        'axes.titlesize': 20,  # Title font size
+        'axes.titleweight': 'bold',  # Title font weight
+        'axes.labelsize': 20,  # Axis label font size
+        'axes.labelweight': 'bold',  # Axis label font weight
+        'xtick.labelsize': 20,  # X-axis tick label font size
+        'ytick.labelsize': 20,  # Y-axis tick label font size
+        'legend.fontsize': 20,  # Legend font size
+        'lines.linewidth': 3,  # Default line thickness
+        'axes.grid': False  # Disable grid lines
+    })
+
+    # Define layout: 2 columns and dynamic row adjustment
+    n = 7  # Number of microgrids
+    cols = 2  # Default column count
+    rows = (n + 1) // cols  # Calculate rows needed
+
+    # Special case: If n is odd, last subplot should be centered
+    fig, axs = plt.subplots(rows, cols, figsize=(35, 10 * rows))
+
+    # get last 7 days of data from power transfer
+    power_transfer_data = power_transfer_data[-7:]
+
+    for i, power_transfers in enumerate(power_transfer_data):
+        row, col = divmod(i, cols)
+
+        # Special case: If n is odd and last graph, center it
+        if n % 2 == 1 and i == n - 1:
+            ax = fig.add_subplot(rows, 1, rows)  # Full row width
+        else:
+            ax = axs[row, col] if rows > 1 else axs[col]
+
+        # Create a directed graph for this microgrid
+        G = nx.DiGraph()
+
+        # Add directed edges with weights
+        for src, dst, power in power_transfers:
+            G.add_edge(src, dst, weight=round(power,2))
+
+        # Generate layout with more spacing
+        pos = nx.spring_layout(G,k=0.8, iterations=20)  # Increased k to spread nodes apart
+
+        # Draw nodes
+        nx.draw_networkx_nodes(G, pos, node_color="lightgreen", node_size=1200, edgecolors="black", ax=ax)
+
+        # Draw edges with directional arrows
+        edges = G.edges(data=True)
+        edge_colors = ['blue' for _ in edges]
+        edge_widths = [max(0.5, d['weight'] / 5) for (_, _, d) in edges]  # Scale width
+
+        edge_labels = {(u, v): f"{d['weight']:.2f} kW" for u, v, d in edges}
+
+        nx.draw_networkx_edges(
+            G, pos, edgelist=edges, width=edge_widths, edge_color=edge_colors,
+            arrows=True, arrowsize=30, alpha=0.8,  # Slight transparency to avoid hiding details
+            connectionstyle="arc3,rad=0.2", min_target_margin=15, ax=ax
+        )
+
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=12, font_color="red", ax=ax)
+
+        # **Fix Node Label Overlaps**
+        label_pos = {k: (v[0], v[1] + 0.05) for k, v in pos.items()}  # Offset labels slightly
+        nx.draw_networkx_labels(G, label_pos, font_size=14, font_weight="bold", ax=ax)
+
+        ax.set_title(f"Day {i }")
+
+        # Adjust layout and show the figure
+        fig.tight_layout()
+    plt.savefig("power_transfer_graphs.png")
+    plt.show()
+
+
+import matplotlib.pyplot as plt
+
+
+def plot_power_transfer_together(time_steps, power_transfer_data):
+    """
+    Superimpose all 7 microgrid power transfer graphs into a single plot.
+
+    :param time_steps: List of time steps.
+    :param power_transfer_data: List of power transfer data for each microgrid.
+    """
+    # Set large font size and visualization settings
+    plt.rcParams.update({
+        'font.size': 40,  # Font size for axis labels and legends
+        'font.weight': 'bold',
+        'axes.titlesize': 40,
+        'axes.titleweight': 'bold',
+        'axes.labelsize': 40,
+        'axes.labelweight': 'bold',
+        'xtick.labelsize': 40,
+        'ytick.labelsize': 40,
+        'legend.fontsize': 40,
+        'lines.linewidth': 6,  # Increase line thickness for visibility
+        'axes.grid': False
+    })
+
+    # Convert time_steps from hours to days
+    time_in_days = [t / 23 for t in time_steps]
+
+    # Create a single figure
+    plt.figure(figsize=(50, 20))
+
+    # Iterate over each microgrid and plot its power transfer on the same graph
+    for i, power_transfer in enumerate(power_transfer_data):
+        plt.plot(time_in_days[-161:], power_transfer[-161:], label=f'Microgrid {i} Transfer', linewidth=4)
+
+    # Add labels, title, and legend
+    plt.xlabel('Time (days)')
+    plt.ylabel('Power Transfer (kW)')
+    plt.title('Aggregated Power Transfer Across Microgrids')
+    plt.legend()
+    plt.grid(True)
+
+    # Save and display the plot
+    plt.savefig(SAVE_DIR + "power_transfer_sac_together.png")
+    plt.show()
+
+def plot_power_transfer_agg(time_steps, power_transfer_data):
     plt.rcParams.update({
         'font.size': 40,  # Set default font size
         'font.weight': 'bold',  # Increase font weight slightly
@@ -363,11 +525,11 @@ def plot_power_transfer(time_steps, power_transfer_data):
         ax = axs[row, col] if rows > 1 else axs[col]  # Handle single-row layout
 
         # Line plot for power transfer
-        ax.plot(time_in_days[-161:], power_transfer[-161:], label=f'Microgrid {i + 1} Transfer')
+        ax.plot(time_in_days[-161:], power_transfer[-161:], label=f'Microgrid {i} Transfer')
 
         ax.set_xlabel('Time (days)')
         ax.set_ylabel('Power Transfer (kW)')
-        ax.set_title(f'Power Transfer for Microgrid {i + 1}')
+        ax.set_title(f'Power Transfer for Microgrid {i}')
         ax.legend()
         ax.grid(True)
 

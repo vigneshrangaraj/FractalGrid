@@ -147,6 +147,7 @@ class FractalGrid(gym.Env):
             grid.current_demand = load_demand
             grid.load.set_current_load(load_demand)
 
+
             # Step 1a: Calculate local net power for the current microgrid (before neighbor interactions)
             local_net_power = grid.calculate_local_net_power(pv_dispatch_power, load_demand)
 
@@ -186,6 +187,8 @@ class FractalGrid(gym.Env):
         # For each neighbor, adjust both microgrids' net power simultaneously if the switch is closed
         neighbor_transfers = [0] * self.num_microgrids  # Store power exchanged with neighbors for each microgrid
 
+        info["power_transfers"] = []
+
         for i, microgrid in enumerate(self.microgrids):
             for neighbor in microgrid.neighbors:
                 neighbor_index = neighbor.index
@@ -214,14 +217,16 @@ class FractalGrid(gym.Env):
                         net_power_i += power_transferred
                         local_net_powers[neighbor_index] -= power_transferred  # Neighbor gives power
                         net_power_neighbor -= power_transferred
-                        if f"power_transfer_{i}" in info:
-                            info[f"power_transfer_{i}"] += power_transferred
+                        info["power_transfers"].append((neighbor_index, i, power_transferred))
+
+                        if f"power_transfer_agg_{i}" in info:
+                            info[f"power_transfer_agg_{i}"] += power_transferred
                         else:
-                            info[f"power_transfer_{i}"] = power_transferred
-                        if f"power_transfer_{neighbor_index}" in info:
-                            info[f"power_transfer_{neighbor_index}"] -= power_transferred
+                            info[f"power_transfer_agg_{i}"] = power_transferred
+                        if f"power_transfer_agg_{neighbor_index}" in info:
+                            info[f"power_transfer_agg_{neighbor_index}"] -= power_transferred
                         else:
-                            info[f"power_transfer_{neighbor_index}"] = -power_transferred
+                            info[f"power_transfer_agg_{neighbor_index}"] = -power_transferred
                     elif net_power_i > 0 and net_power_neighbor < 0:
                         # Microgrid i has excess power, neighbor needs power
                         power_transferred = min(net_power_i, abs(net_power_neighbor))
@@ -229,15 +234,16 @@ class FractalGrid(gym.Env):
                         net_power_i -= power_transferred
                         local_net_powers[neighbor_index] += power_transferred  # Neighbor receives power
                         net_power_neighbor += power_transferred
-                        if f"power_transfer_{i}" in info:
-                            info[f"power_transfer_{i}"] -= power_transferred
-                        else:
-                            info[f"power_transfer_{i}"] = -power_transferred
-                        if f"power_transfer_{neighbor_index}" in info:
-                            info[f"power_transfer_{neighbor_index}"] += power_transferred
-                        else:
-                            info[f"power_transfer_{neighbor_index}"] = power_transferred
+                        info["power_transfers"].append((i, neighbor_index, power_transferred))
 
+                        if f"power_transfer_agg_{i}" in info:
+                            info[f"power_transfer_agg_{i}"] -= power_transferred
+                        else:
+                            info[f"power_transfer_agg_{i}"] = -power_transferred
+                        if f"power_transfer_agg_{neighbor_index}" in info:
+                            info[f"power_transfer_agg_{neighbor_index}"] += power_transferred
+                        else:
+                            info[f"power_transfer_agg_{neighbor_index}"] = power_transferred
                     if power_transferred != 0:
                         info[switch_name] = 1
                     else:
